@@ -155,7 +155,6 @@ npx playwright test
 
 ## 📸 Preview
 
-_(Add screenshot / demo GIF here)_
 ![alt text](image.png)
 ![alt text](image-1.png)
 ![alt text](image-4.png)
