@@ -1,4 +1,4 @@
-import { auth } from "./src/lib/auth";
+import { auth } from "../src/lib/auth";
 
 async function main() {
     console.log("Creating new admin account for Freshtoria...");

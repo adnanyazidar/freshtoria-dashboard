@@ -1,5 +1,5 @@
-import { db } from './src/db';
-import { usersTable } from './src/db/schema';
+import { db } from '../src/db';
+import { usersTable } from '../src/db/schema';
 
 async function main() {
     const users = await db.select().from(usersTable);
