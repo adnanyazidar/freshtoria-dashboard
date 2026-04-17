@@ -48,12 +48,12 @@ export async function addInventoryItem(data: {
         catatan,
     };
 
-    await db.transaction((tx) => {
+    await db.transaction(async (tx) => {
         // 1. Insert item inventory
-        tx.insert(inventoryTable).values(newItem).run();
+        await tx.insert(inventoryTable).values(newItem);
 
         // 2. Catat pengeluaran di cashFlow (Total Nilai = biaya pembelian bahan)
-        tx.insert(cashFlowTable).values({
+        await tx.insert(cashFlowTable).values({
             id: `CF-OUT-INV-${Date.now()}`,
             tipeMutasi: "PENGELUARAN",
             kategori: "RESTOCK_BAHAN",
@@ -62,17 +62,17 @@ export async function addInventoryItem(data: {
             keterangan: `Pembelian bahan ${namaBarang} (${stokMasuk} ${satuan || 'unit'} × Rp ${hargaSatuan.toLocaleString('id-ID')})`,
             referensiId: `INV-${skuId}`,
             userId: userId,
-        }).run();
+        });
 
         // 3. Audit trail
-        tx.insert(auditTrailTable).values({
+        await tx.insert(auditTrailTable).values({
             id: generateId(),
             userId,
             action: "Create",
             entityType: "Inventory & Finance",
             newData: JSON.stringify(newItem),
             timestamp: new Date(),
-        }).run();
+        });
     });
 
     revalidatePath("/inventory");
@@ -181,27 +181,27 @@ export async function updateInventoryItemData(
         totalRestockValue += rst.hargaTotal;
     }
 
-    await db.transaction((tx) => {
+    await db.transaction(async (tx) => {
         // 1. Update inventory item
-        tx.update(inventoryTable)
+        await tx.update(inventoryTable)
             .set(updatedData)
             .where(eq(inventoryTable.skuId, skuId))
-            .run();
+            ;
 
         // 2. Reconcile Cash Flow: Hapus SEMUA pengeluaran kas lama untuk item ini (INV & EDIT)
-        tx.delete(cashFlowTable)
+        await tx.delete(cashFlowTable)
             .where(eq(cashFlowTable.referensiId, `INV-${skuId}`))
-            .run();
-        tx.delete(cashFlowTable)
+            ;
+        await tx.delete(cashFlowTable)
             .where(eq(cashFlowTable.referensiId, `EDIT-${skuId}`))
-            .run();
+            ;
 
         // 3. Buat SATU record pengeluaran baru yang akurat sesuai totalNilai terkini
         // Ini memastikan finance selalu 100% sinkron dengan stokMasuk * hargaSatuan
         const initialPurchaseValue = totalNilai - totalRestockValue;
 
         if (initialPurchaseValue > 0) {
-            tx.insert(cashFlowTable).values({
+            await tx.insert(cashFlowTable).values({
                 id: `CF-OUT-INV-${Date.now()}`,
                 tipeMutasi: "PENGELUARAN",
                 kategori: "RESTOCK_BAHAN",
@@ -210,9 +210,9 @@ export async function updateInventoryItemData(
                 keterangan: `Pembelian awal & penyesuaian bahan ${data.namaBarang} (Base Value)`,
                 referensiId: `INV-${skuId}`, // Gunakan INV lagi sebagai source of truth tunggal
                 userId: userId,
-            }).run();
+            });
         } else if (initialPurchaseValue < 0) {
-            tx.insert(cashFlowTable).values({
+            await tx.insert(cashFlowTable).values({
                 id: `CF-IN-ADJ-${Date.now()}`,
                 tipeMutasi: "PEMASUKAN",
                 kategori: "LAINNYA",
@@ -221,11 +221,11 @@ export async function updateInventoryItemData(
                 keterangan: `Penyesuaian turun harga bahan ${data.namaBarang}`,
                 referensiId: `INV-${skuId}`,
                 userId: userId,
-            }).run();
+            });
         }
 
         // 4. Audit trail
-        tx.insert(auditTrailTable).values({
+        await tx.insert(auditTrailTable).values({
             id: generateId(),
             userId,
             action: "Update Full",
@@ -233,7 +233,7 @@ export async function updateInventoryItemData(
             oldData: JSON.stringify(item),
             newData: JSON.stringify({ ...item, ...updatedData }),
             timestamp: new Date(),
-        }).run();
+        });
     });
 
     revalidatePath("/inventory");
@@ -260,41 +260,41 @@ export async function deleteInventoryItem(skuId: string) {
         .from(restockTransactionsTable)
         .where(eq(restockTransactionsTable.skuId, skuId));
 
-    await db.transaction((tx) => {
+    await db.transaction(async (tx) => {
         // 1. Hapus semua cashFlow EDIT & INV terkait SKU
-        tx.delete(cashFlowTable)
+        await tx.delete(cashFlowTable)
             .where(eq(cashFlowTable.referensiId, `EDIT-${skuId}`))
-            .run();
-        tx.delete(cashFlowTable)
+            ;
+        await tx.delete(cashFlowTable)
             .where(eq(cashFlowTable.referensiId, `INV-${skuId}`))
-            .run();
+            ;
 
         // 2. Hapus semua cashFlow restock terkait SKU (via restockTransactionsTable)
         for (const rst of restockRecords) {
-            tx.delete(cashFlowTable)
+            await tx.delete(cashFlowTable)
                 .where(eq(cashFlowTable.referensiId, rst.id))
-                .run();
+                ;
         }
 
         // 3. Hapus semua restock transactions
-        tx.delete(restockTransactionsTable)
+        await tx.delete(restockTransactionsTable)
             .where(eq(restockTransactionsTable.skuId, skuId))
-            .run();
+            ;
 
         // 4. Hapus item inventory
-        tx.delete(inventoryTable)
+        await tx.delete(inventoryTable)
             .where(eq(inventoryTable.skuId, skuId))
-            .run();
+            ;
 
         // 5. Audit trail
-        tx.insert(auditTrailTable).values({
+        await tx.insert(auditTrailTable).values({
             id: generateId(),
             userId,
             action: "Delete",
             entityType: "Inventory & Finance",
             oldData: JSON.stringify(item),
             timestamp: new Date(),
-        }).run();
+        });
     });
 
     revalidatePath("/inventory");
@@ -319,13 +319,13 @@ export async function processRestock(
     }
 
     // Menggunakan Transaction agar kalau ada error di Restock, Cash Flow juga batal
-    db.transaction((tx) => {
+    await db.transaction(async (tx) => {
         // 1. Ambil data stok barang terkini
-        const itemResult = tx
+        const itemResult = await tx
             .select()
             .from(inventoryTable)
             .where(eq(inventoryTable.skuId, skuId))
-            .all();
+            ;
 
         const item = itemResult[0];
 
@@ -339,7 +339,7 @@ export async function processRestock(
         const status = stokAkhir > 2 ? "Tersedia" : "Hampir Habis";
 
         // 3. Update master barang (Inventory)
-        tx.update(inventoryTable)
+        await tx.update(inventoryTable)
             .set({
                 stokMasuk: stokMskBrtambah,
                 stokAkhir,
@@ -347,11 +347,11 @@ export async function processRestock(
                 status,
             })
             .where(eq(inventoryTable.skuId, skuId))
-            .run();
+            ;
 
         // 4. Catat Riwayat Bukti Pembelian Bahan di Ledger Restock
         const restockId = `RST-${Date.now()}`;
-        tx.insert(restockTransactionsTable).values({
+        await tx.insert(restockTransactionsTable).values({
             id: restockId,
             skuId,
             jumlahBeli,
@@ -360,11 +360,11 @@ export async function processRestock(
             supplier: supplier || "N/A",
             keterangan: keterangan || "Restock bahan baku rutin",
             userId,
-        }).run();
+        });
 
         // 5. Catat Mutasi Keluar di Buku Besar Kas (Cash Flow)
         const mutasiId = `CF-OUT-${Date.now()}`;
-        tx.insert(cashFlowTable).values({
+        await tx.insert(cashFlowTable).values({
             id: mutasiId,
             tipeMutasi: "PENGELUARAN",
             kategori: "RESTOCK_BAHAN",
@@ -373,17 +373,17 @@ export async function processRestock(
             keterangan: `Pembelian stok bahan ${item.namaBarang} (${jumlahBeli} unit)`,
             referensiId: restockId,
             userId,
-        }).run();
+        });
 
         // 6. Audit Logging (Standar)
-        tx.insert(auditTrailTable).values({
+        await tx.insert(auditTrailTable).values({
             id: generateId(),
             userId,
             action: "Restock Process",
             entityType: "Inventory & Finance",
             newData: JSON.stringify({ skuId, jumlahBeli, hargaTotal, mutasiId }),
             timestamp: new Date(),
-        }).run();
+        });
     });
 
     revalidatePath("/inventory");
@@ -448,9 +448,9 @@ export async function revertRestockTransaction(cashFlowId: string) {
     const status = newStokAkhir > 2 ? "Tersedia" : "Hampir Habis";
 
     // 6. Eksekusi Atomik Database
-    await db.transaction((tx) => {
+    await db.transaction(async (tx) => {
         // Balikkan stok di master barang
-        tx.update(inventoryTable)
+        await tx.update(inventoryTable)
             .set({
                 stokMasuk: newStokMasuk,
                 stokAkhir: newStokAkhir,
@@ -458,16 +458,16 @@ export async function revertRestockTransaction(cashFlowId: string) {
                 status,
             })
             .where(eq(inventoryTable.skuId, skuId))
-            .run();
+            ;
 
         // Hapus history restocknya
-        tx.delete(restockTransactionsTable).where(eq(restockTransactionsTable.id, restockId)).run();
+        await tx.delete(restockTransactionsTable).where(eq(restockTransactionsTable.id, restockId));
 
         // Hapus mutasi pengeluarannya (Buku Kas otomatis menyesuaikan Saldo karena row-nya hilang)
-        tx.delete(cashFlowTable).where(eq(cashFlowTable.id, cashFlowId)).run();
+        await tx.delete(cashFlowTable).where(eq(cashFlowTable.id, cashFlowId));
 
         // Catat di Audit Trail
-        tx.insert(auditTrailTable).values({
+        await tx.insert(auditTrailTable).values({
             id: generateId(),
             userId,
             action: "Revert Restock",
@@ -475,7 +475,7 @@ export async function revertRestockTransaction(cashFlowId: string) {
             oldData: JSON.stringify(restockRecord),
             newData: JSON.stringify({ reason: "Pembatalan User", mutasiDihapus: cashFlowId }),
             timestamp: new Date(),
-        }).run();
+        });
     });
 
     revalidatePath("/inventory");

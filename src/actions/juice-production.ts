@@ -51,22 +51,22 @@ export async function addJuiceProduction(data: {
         pengeluaran: data.pengeluaran,
     };
 
-    await db.transaction((tx) => {
+    await db.transaction(async (tx) => {
         // 1. Catat di tabel produksi jus
-        tx.insert(financeTable).values(newProduction).run();
+        await tx.insert(financeTable).values(newProduction);
 
         // 2. (REMOVED) Sesuai feedback, pengeluaran produksi tidak lagi dimasukkan ke cashFlowTable (OUT).
         // Pengeluaran di buku kas hanya untuk menu Inventory (Restock).
 
         // 3. Catat ke Audit Trail
-        tx.insert(auditTrailTable).values({
+        await tx.insert(auditTrailTable).values({
             id: generateId(),
             userId: userId,
             action: "Create",
             entityType: "Juice Production",
             newData: JSON.stringify(newProduction),
             timestamp: new Date(),
-        }).run();
+        });
     });
 
     revalidatePath("/finance");
@@ -82,25 +82,25 @@ export async function deleteJuiceProduction(id: string) {
     if (!session) throw new Error("Unauthorized");
     const userId = session.user.id;
 
-    const recordResult = db.select().from(financeTable).where(eq(financeTable.id, id)).all();
+    const recordResult = await db.select().from(financeTable).where(eq(financeTable.id, id));
     const record = recordResult[0];
 
     if (!record) throw new Error("Data Produksi Jus tidak ditemukan");
 
-    db.transaction((tx) => {
-        tx.delete(financeTable).where(eq(financeTable.id, id)).run();
+    await db.transaction(async (tx) => {
+        await tx.delete(financeTable).where(eq(financeTable.id, id));
 
         // Catatan kas tidak lagi dihapus di sini karena produksi sudah tidak masuk kas.
         // Penjualan (SALE) masuk kas, tapi secara aturan akuntansi sistem ini, jika sudah terjual tidak bisa dihapus produksinya.
 
-        tx.insert(auditTrailTable).values({
+        await tx.insert(auditTrailTable).values({
             id: generateId(),
             userId,
             action: "Delete",
             entityType: "Juice Production",
             oldData: JSON.stringify(record),
             timestamp: new Date(),
-        }).run();
+        });
     });
 
     revalidatePath("/finance");
@@ -127,7 +127,7 @@ export async function updateJuiceProduction(
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session) throw new Error("Unauthorized");
     const userId = session.user.id;
-    const recordResult = db.select().from(financeTable).where(eq(financeTable.id, id)).all();
+    const recordResult = await db.select().from(financeTable).where(eq(financeTable.id, id));
     const record = recordResult[0];
 
     if (!record) throw new Error("Data Produksi Jus tidak ditemukan");
@@ -157,8 +157,8 @@ export async function updateJuiceProduction(
         pengeluaran: data.pengeluaran,
     };
 
-    await db.transaction((tx) => {
-        tx.update(financeTable).set(updatedData).where(eq(financeTable.id, id)).run();
+    await db.transaction(async (tx) => {
+        await tx.update(financeTable).set(updatedData).where(eq(financeTable.id, id));
 
         // Rekonsiliasi Cash Flow:
         // Cash Flow IN / OUT untuk record produksi sudah dihilangkan.
@@ -177,7 +177,7 @@ export async function sellJuiceProduction(id: string, qtySold: number) {
     if (!session) throw new Error("Unauthorized");
     const userId = session.user.id;
 
-    const recordResult = db.select().from(financeTable).where(eq(financeTable.id, id)).all();
+    const recordResult = await db.select().from(financeTable).where(eq(financeTable.id, id));
     const record = recordResult[0];
 
     if (!record) throw new Error("Data Produksi Jus tidak ditemukan");
@@ -186,17 +186,17 @@ export async function sellJuiceProduction(id: string, qtySold: number) {
 
     const incomeFromSale = qtySold * record.hargaProduk;
 
-    await db.transaction((tx) => {
-        tx.update(financeTable).set({
+    await db.transaction(async (tx) => {
+        await tx.update(financeTable).set({
             terjual: sql`${financeTable.terjual} + ${qtySold}`,
             produkSisa: sql`${financeTable.produkSisa} - ${qtySold}`,
             totalPayment: sql`${financeTable.totalPayment} + ${incomeFromSale}`,
             minus: sql`${financeTable.minus} - ${incomeFromSale}`,
             status: "Success Payment"
-        }).where(eq(financeTable.id, id)).run();
+        }).where(eq(financeTable.id, id));
 
         // Catat Pemasukan Buku Kas (Pendapatan kotor dimasukkan ke kas)
-        tx.insert(cashFlowTable).values({
+        await tx.insert(cashFlowTable).values({
             id: `CF-IN-${Date.now()}-SALE`,
             tipeMutasi: "PEMASUKAN",
             kategori: "PENJUALAN",
@@ -205,9 +205,9 @@ export async function sellJuiceProduction(id: string, qtySold: number) {
             keterangan: `Penjualan ${qtySold} botol ${record.menuSmoothies}`,
             referensiId: id,
             userId: userId,
-        }).run();
+        });
 
-        tx.insert(auditTrailTable).values({
+        await tx.insert(auditTrailTable).values({
             id: generateId(),
             userId: userId,
             action: "Sell",
@@ -215,7 +215,7 @@ export async function sellJuiceProduction(id: string, qtySold: number) {
             oldData: JSON.stringify(record),
             newData: JSON.stringify({ qtySold, incomeFromSale }),
             timestamp: new Date(),
-        }).run();
+        });
     });
 
     revalidatePath("/finance");

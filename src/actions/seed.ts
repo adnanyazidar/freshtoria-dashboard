@@ -6,8 +6,12 @@ import { auth } from "@/lib/auth"; // Accessing server Better-auth API
 
 export async function createDefaultAdmin() {
     try {
-        const dummyEmail = "admin@juicesync.local";
-        const dummyPassword = "admin123";
+        const dummyEmail = process.env.ADMIN_EMAIL || "admin@juicesync.local";
+        // In production, fallback to a secure random password if not provided
+        const fallbackPassword = process.env.NODE_ENV === "production" 
+            ? Math.random().toString(36).slice(-12) // Just as a secure fallback
+            : "admin123";
+        const dummyPassword = process.env.ADMIN_PASSWORD || fallbackPassword;
 
         // Use better-auth natively so that the password is automatically standard hashed
         const user = await auth.api.signUpEmail({

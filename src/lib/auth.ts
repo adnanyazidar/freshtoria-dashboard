@@ -23,8 +23,9 @@ export const auth = betterAuth({
             lastLogin: { type: "date" },
         },
     },
+
     trustedOrigins: [
         "http://localhost:3000",
-        "https://increasingly-formation-realtors-licenses.trycloudflare.com"
+        process.env.NEXT_PUBLIC_APP_URL || "https://freshtoria-dashboard.vercel.app"
     ],
 });
